@@ -8,19 +8,36 @@ from google.cloud import vision
 import arabic_reshaper
 from bidi.algorithm import get_display
 from dotenv import load_dotenv
-load_dotenv()
-load_dotenv(dotenv_path="E:\Projects\al-kitab\.env")
-# === API Key ===
 
-openai_api_key = os.getenv("OPENAIKEY")
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"E:\Projects\al-kitab\static-mile-460504-q5-253eccbdfafa.json"
+# === Setup ===
+BASE_DIR = os.path.dirname(__file__)
+load_dotenv()
+openai.api_key = os.getenv("OPENAIKEY")
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.join(BASE_DIR, "static-mile-460504-q5-253eccbdfafa.json")
+
 # === Translate with OpenL ===
 def translate_openl(text):
     try:
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "Translate the following English text to Levantine Shami Arabic perferably the palestinian dialect. Keep it in casual manga dialogue tone."},
+                {
+                    "role": "system",
+                    "content": (
+                        "You're an expert Arabic manga translator. Translate English text into spoken Palestinian Shami Arabic with natural, emotionally expressive phrasing like you'd hear in a conversation or dubbed anime.\n\n"
+                        "✅ Follow these rules:\n"
+                        "- Use only Palestinian Levantine (no Modern Standard Arabic).\n"
+                        "- Avoid literal structure—translate ideas, not grammar.\n"
+                        "- Keep emotional tone, slang, and phrasing local to Palestinian speech.\n"
+                        "- Use connectors like: إنو، هاد، هيك، شو، ليش، بقلك، مهاجمينا، هالحكي، بكون، بدنا، الخ…\n"
+                        "- Masculine/feminine forms must match.\n"
+                        "- Preserve the original artist’s intent and emotional weight of the scene.\n"
+                        "- Add punctuation that reflects tone (!؟…) but **don’t add or invent** content.\n\n"
+                        "❌ Wrong: 'من كان يخبر الجميع أنهم يهاجموننا؟'\n"
+                        "✅ Right: 'مين قال للكل إنو كانوا مهاجمينا؟'\n\n"
+                        "Only return the Arabic translation."
+                    )
+                },
                 {"role": "user", "content": text}
             ],
             temperature=0.7,
@@ -53,7 +70,6 @@ def google_ocr(image_path):
                     word_text = ''.join([symbol.text for symbol in word.symbols])
                     sentence_text += word_text + " "
                     for vertex in word.bounding_box.vertices:
-                        print(vertex.x, vertex.y)
                         x_coords.append(vertex.x)
                         y_coords.append(vertex.y)
 
@@ -96,11 +112,9 @@ def erase_sentences_from_image(image_path, sentence_boxes, output_path):
 
     image = Image.open(image_path).convert("RGB")
     draw = ImageDraw.Draw(image)
-    font_path = "E:/Projects/al-kitab/Noto_Naskh_Arabic/NotoNaskhArabic-VariableFont_wght.ttf"
-
+    font_path = os.path.join(BASE_DIR, "Noto_Naskh_Arabic", "NotoNaskhArabic-VariableFont_wght.ttf")
     padding_x, padding_y = 12, 10
 
-    # === Phase 1: Erase all old text first ===
     for box in sentence_boxes:
         x0, y0, x1, y1 = box["bbox"]
         x0 = max(0, x0 - padding_x)
@@ -109,14 +123,10 @@ def erase_sentences_from_image(image_path, sentence_boxes, output_path):
         y1 += padding_y
         draw.rectangle([(x0, y0), (x1, y1)], fill="white")
 
-    # === Phase 2: Translate and draw Arabic ===
     for box in sentence_boxes:
         text = box["text"].strip()
-
-        # Skip broken, small, or garbage text
         if not text or text.isspace():
             continue
-
 
         x0, y0, x1, y1 = box["bbox"]
         x0 = max(0, x0 - padding_x)
@@ -129,18 +139,14 @@ def erase_sentences_from_image(image_path, sentence_boxes, output_path):
             continue
 
         translated_text = translate_openl(text)
-        #time.sleep(0.7)
-
         if any(p in translated_text.lower() for p in invalid_phrases):
             print(f"Skipping invalid translation: {translated_text}")
             continue
-        # Cuts the string and removes english letters 
         translated_text = re.sub(r'[A-Za-z]', '', translated_text).strip()
-
-        # Skip if the result is now empty or just symbols
         if not translated_text or translated_text.isspace():
             print("Translation was empty after removing English.")
             continue
+
         font_size = 23
         min_font_size = 18
         chosen_font = None
@@ -157,7 +163,7 @@ def erase_sentences_from_image(image_path, sentence_boxes, output_path):
             reshaped_lines = [get_display(arabic_reshaper.reshape(line)) for line in wrapped_lines]
 
             line_height = draw.textbbox((0, 0), "Test", font=font)[3]
-            total_height = line_height * len(reshaped_lines) + (len(reshaped_lines) - 1) * 4  # line spacing
+            total_height = line_height * len(reshaped_lines) + (len(reshaped_lines) - 1) * 4
 
             if total_height <= max_height:
                 chosen_font = font
@@ -178,11 +184,10 @@ def erase_sentences_from_image(image_path, sentence_boxes, output_path):
             line_width = draw.textbbox((0, 0), line, font=font)[2]
             center_x = x0 + ((max_width - line_width) // 2)
             draw.text((center_x, current_y), line, fill="black", font=font)
-            current_y += line_height + 4  # spacing
+            current_y += line_height + 4
 
     image.save(output_path)
     print(f"✅ Translated and saved: {output_path}")
-
 
 # === Batch Processor ===
 def process_folder(folder_path, output_folder):
@@ -198,6 +203,6 @@ def process_folder(folder_path, output_folder):
             erase_sentences_from_image(input_path, sentences, output_path)
 
 # === Run ===
-input_folder = "E:/Projects/al-kitab/images"
-output_folder = "E:/Projects/al-kitab/output"
+input_folder = os.path.join(BASE_DIR, "images")
+output_folder = os.path.join(BASE_DIR, "output")
 process_folder(input_folder, output_folder)
